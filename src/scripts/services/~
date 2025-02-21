@@ -1,0 +1,137 @@
+import { BLOCKFROST_CONFIG } from '../config/blockfrost';
+
+const API_URL = 'https://cardano-mainnet.blockfrost.io/api/v0';
+
+export interface StakePool {
+    pool_id: string;
+    hex: string;
+    vrf_key: string;
+    blocks_minted: number;
+    blocks_epoch: number;
+    live_stake: string;
+    live_size: number;
+    live_saturation: number;
+    live_delegators: number;
+    active_stake: string;
+    active: boolean;
+    metadata?: {
+        name: string;
+        description: string;
+        ticker: string;
+        homepage: string;
+        location?: string;
+    };
+}
+
+type ProgressCallback = (current: number, total: number) => void;
+
+class CardanoService {
+    private headers: Record<string, string>;
+    private batchSize = 50; // Blockfrost has a rate limit, so we process in batches
+    private delayBetweenBatches = 1000; // 1 second delay between batches
+
+    constructor() {
+        this.headers = {
+            'project_id': process.env.NEXT_PUBLIC_BLOCKFROST_PROJECT_ID || '',
+            'Content-Type': 'application/json'
+        };
+    }
+
+    private async fetchApi<T>(endpoint: string): Promise<T> {
+        const response = await fetch(`${API_URL}${endpoint}`, {
+            headers: this.headers
+        });
+
+        if (!response.ok) {
+            throw new Error(`API call failed: ${response.statusText}`);
+        }
+
+        const data = await response.json();
+        return data as T;
+    }
+
+    private async sleep(ms: number) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+
+    private async processBatch(poolIds: string[], startIdx: number) {
+        const batchPoolIds = poolIds.slice(startIdx, startIdx + this.batchSize);
+        const poolPromises = batchPoolIds.map(poolId => 
+            this.fetchApi<Partial<StakePool>>(`/pools/${poolId}`)
+        );
+        
+        const pools = await Promise.all(poolPromises);
+        
+        // Get metadata for each pool in the batch
+        const poolsWithMetadataPromises = pools.map(async pool => {
+            if (!pool.pool_id) return pool as StakePool;
+            
+            try {
+                const metadata = await this.fetchApi<StakePool['metadata']>(`/pools/${pool.pool_id}/metadata`);
+                return { 
+                    ...pool,
+                    active: true,
+                    metadata 
+                } as StakePool;
+            } catch {
+                return {
+                    ...pool,
+                    active: true
+                } as StakePool;
+            }
+        });
+
+        return Promise.all(poolsWithMetadataPromises);
+    }
+
+    async getAllStakePools(onProgress?: ProgressCallback): Promise<StakePool[]> {
+        try {
+            // Get all stake pool IDs
+            const poolIds = await this.fetchApi<string[]>('/pools');
+            const allPools: StakePool[] = [];
+            
+            // Initialize progress
+            onProgress?.(0, poolIds.length);
+            
+            // Process pools in batches
+            for (let i = 0; i < poolIds.length; i += this.batchSize) {
+                const batchPools = await this.processBatch(poolIds, i);
+                allPools.push(...batchPools);
+                
+                // Update progress
+                onProgress?.(allPools.length, poolIds.length);
+                
+                // Wait before processing next batch to respect rate limits
+                if (i + this.batchSize < poolIds.length) {
+                    await this.sleep(this.delayBetweenBatches);
+                }
+            }
+
+            return allPools;
+        } catch (error) {
+            console.error('Error fetching stake pools:', error);
+            throw error;
+        }
+    }
+
+    async getCurrentEpoch() {
+        try {
+            return await this.fetchApi('/epochs/latest');
+        } catch (error) {
+            console.error('Error fetching current epoch:', error);
+            throw error;
+        }
+    }
+
+    async getPoolDelegatorsCount(poolId: string): Promise<number> {
+        try {
+            const pool = await this.fetchApi<StakePool>(`/pools/${poolId}`);
+            return pool.live_delegators;
+        } catch (error) {
+            console.error(`Error fetching delegators count for pool ${poolId}:`, error);
+            throw error;
+        }
+    }
+}
+
+export const cardanoService = new CardanoService(); 
