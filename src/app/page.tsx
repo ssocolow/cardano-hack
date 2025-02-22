@@ -1,194 +1,134 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import React, { useState } from 'react';
+import dynamic from 'next/dynamic';
 
-// Define the type locally or in a separate types file
-interface StakePool {
-    pool_id: string;
-    hex: string;
-    vrf_key: string;
-    blocks_minted: number;
-    blocks_epoch: number;
-    live_stake: string;
-    live_size: number;
-    live_saturation: number;
-    live_delegators: number;
-    active_stake: string;
-    active: boolean;
-    metadata?: {
-        name: string;
-        description: string;
-        ticker: string;
-        homepage: string;
-        location?: string;
-    };
+// Dynamically import the bubble chart component with no SSR
+// This is necessary because D3 requires the window object
+const StakePoolBubbleChart = dynamic(
+    () => import('../components/StakePoolBubbleChart'),
+    { ssr: false }
+);
+
+import { useEffect } from 'react';
+import { StakePool } from '../scripts/services/CardanoService';
+
+interface PoolsResponse {
+    pools: StakePool[];
+    lastUpdate: string;
+    totalPools: number;
 }
 
-// Utility function to format ADA amounts
-const formatADA = (lovelace: string) => {
-  const ada = parseInt(lovelace) / 1000000;
-  return new Intl.NumberFormat('en-US', {
-    maximumFractionDigits: 2,
-    minimumFractionDigits: 0,
-  }).format(ada);
-};
+export default function HomePage() {
+    const [pools, setPools] = useState<StakePool[]>([]);
+    const [lastUpdate, setLastUpdate] = useState<string>('');
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState<string | null>(null);
+    const [showGuide, setShowGuide] = useState(true);
+    const [darkMode, setDarkMode] = useState(false);
 
-// Utility function to format date
-const formatDate = (dateString: string) => {
-  return new Date(dateString).toLocaleString();
-};
+    useEffect(() => {
+        const fetchPools = async () => {
+            try {
+                const response = await fetch('/api/pools');
+                if (!response.ok) {
+                    throw new Error('Failed to fetch pools');
+                }
+                const data: PoolsResponse = await response.json();
+                console.log('Fetched pools:', data);
+                setPools(data.pools);
+                setLastUpdate(new Date(data.lastUpdate).toLocaleString());
+            } catch (err) {
+                console.error('Error fetching pools:', err);
+                setError(err instanceof Error ? err.message : 'Failed to load pools');
+            } finally {
+                setLoading(false);
+            }
+        };
 
-type SortField = 'stake' | 'delegators' | 'blocks';
-type SortDirection = 'asc' | 'desc';
+        fetchPools();
+    }, []);
 
-export default function Home() {
-  const [stakePools, setStakePools] = useState<StakePool[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [lastUpdate, setLastUpdate] = useState<string>('');
-  const [error, setError] = useState<string | null>(null);
-  const [sortField, setSortField] = useState<SortField>('stake');
-  const [sortDirection, setSortDirection] = useState<SortDirection>('desc');
-  const [searchTerm, setSearchTerm] = useState('');
-
-  useEffect(() => {
-    const fetchPools = async () => {
-      try {
-        const response = await fetch('/api/pools');
-        if (!response.ok) {
-          throw new Error('Failed to fetch pools');
-        }
-        const data = await response.json();
-        setStakePools(data.pools);
-        setLastUpdate(data.lastUpdate);
-      } catch (err) {
-        setError('Failed to fetch stake pools');
-        console.error(err);
-      } finally {
-        setLoading(false);
-      }
+    const toggleDarkMode = () => {
+        setDarkMode(!darkMode);
     };
 
-    fetchPools();
-  }, []);
-
-  const sortedPools = useMemo(() => {
-    return [...stakePools]
-      .filter(pool => {
-        const searchLower = searchTerm.toLowerCase();
+    if (loading) {
         return (
-          pool.metadata?.name?.toLowerCase().includes(searchLower) ||
-          pool.metadata?.ticker?.toLowerCase().includes(searchLower) ||
-          pool.pool_id.toLowerCase().includes(searchLower)
-        );
-      })
-      .sort((a, b) => {
-        const direction = sortDirection === 'desc' ? -1 : 1;
-        switch (sortField) {
-          case 'stake':
-            return (parseInt(a.live_stake) - parseInt(b.live_stake)) * direction;
-          case 'delegators':
-            return (a.live_delegators - b.live_delegators) * direction;
-          case 'blocks':
-            return (a.blocks_minted - b.blocks_minted) * direction;
-          default:
-            return 0;
-        }
-      });
-  }, [stakePools, sortField, sortDirection, searchTerm]);
-
-  const handleSort = (field: SortField) => {
-    if (sortField === field) {
-      setSortDirection(prev => prev === 'desc' ? 'asc' : 'desc');
-    } else {
-      setSortField(field);
-      setSortDirection('desc');
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center min-h-screen">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  if (error) {
-    return <div className="flex items-center justify-center min-h-screen text-red-500">{error}</div>;
-  }
-
-  return (
-    <main className="min-h-screen p-8">
-      <div className="max-w-7xl mx-auto">
-        <div className="flex justify-between items-center mb-6">
-          <h1 className="text-3xl font-bold">Cardano Stake Pools</h1>
-          <div className="text-right">
-            <p className="text-gray-600">Total Pools: {stakePools.length}</p>
-            <p className="text-sm text-gray-500">Last updated: {formatDate(lastUpdate)}</p>
-          </div>
-        </div>
-        
-        <div className="mb-6">
-          <input
-            type="text"
-            placeholder="Search pools by name, ticker, or ID..."
-            className="w-full p-2 border rounded-lg"
-            value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
-          />
-        </div>
-
-        <div className="mb-4 flex gap-4">
-          <button
-            onClick={() => handleSort('stake')}
-            className={`px-4 py-2 rounded ${sortField === 'stake' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
-          >
-            Sort by Stake {sortField === 'stake' && (sortDirection === 'desc' ? '↓' : '↑')}
-          </button>
-          <button
-            onClick={() => handleSort('delegators')}
-            className={`px-4 py-2 rounded ${sortField === 'delegators' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
-          >
-            Sort by Delegators {sortField === 'delegators' && (sortDirection === 'desc' ? '↓' : '↑')}
-          </button>
-          <button
-            onClick={() => handleSort('blocks')}
-            className={`px-4 py-2 rounded ${sortField === 'blocks' ? 'bg-blue-500 text-white' : 'bg-gray-200'}`}
-          >
-            Sort by Blocks {sortField === 'blocks' && (sortDirection === 'desc' ? '↓' : '↑')}
-          </button>
-        </div>
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-          {sortedPools.map((pool) => (
-            <div key={pool.pool_id} className="border rounded-lg p-4 shadow-sm hover:shadow-md transition-shadow">
-              <h2 className="text-xl font-semibold mb-2">
-                {pool.metadata?.name || 'Unnamed Pool'}
-              </h2>
-              <p className="text-sm text-gray-600 mb-2">
-                {pool.metadata?.ticker || 'No Ticker'}
-              </p>
-              <div className="text-sm space-y-1">
-                <p className="flex justify-between">
-                  <span className="text-gray-600">Live Stake:</span>
-                  <span className="font-medium">{formatADA(pool.live_stake)} ₳</span>
-                </p>
-                <p className="flex justify-between">
-                  <span className="text-gray-600">Delegators:</span>
-                  <span className="font-medium">{pool.live_delegators.toLocaleString()}</span>
-                </p>
-                <p className="flex justify-between">
-                  <span className="text-gray-600">Blocks Minted:</span>
-                  <span className="font-medium">{pool.blocks_minted.toLocaleString()}</span>
-                </p>
-                {pool.metadata?.location && (
-                  <p className="text-gray-600 mt-2">📍 {pool.metadata.location}</p>
-                )}
-              </div>
+            <div className={`h-screen flex items-center justify-center ${darkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-800'}`}>
+                <div className="text-xl">Loading stake pools...</div>
             </div>
-          ))}
+        );
+    }
+
+    if (error) {
+        return (
+            <div className={`h-screen flex items-center justify-center ${darkMode ? 'bg-gray-900' : 'bg-white'}`}>
+                <div className="text-xl text-red-600">Error: {error}</div>
+            </div>
+        );
+    }
+
+    return (
+        <div className={`h-screen overflow-hidden ${darkMode ? 'bg-gray-900 text-white' : 'bg-white text-gray-800'}`}>
+            <div className="h-full container mx-auto px-4 py-8 flex flex-col">
+                <div className="flex justify-between items-center mb-4">
+                    <h1 className={`text-3xl font-bold ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                        Cardano Stake Pool Visualization
+                    </h1>
+                    <div className="flex items-center gap-4">
+                        <div className={`text-sm ${darkMode ? 'text-gray-300' : 'text-gray-600'}`}>
+                            Pool list last updated: {lastUpdate}
+                        </div>
+                        <button
+                            onClick={toggleDarkMode}
+                            className={`p-2 rounded-lg ${darkMode ? 'bg-gray-700 text-yellow-300' : 'bg-gray-200 text-gray-700'} hover:opacity-80 transition-colors`}
+                            aria-label="Toggle dark mode"
+                        >
+                            {darkMode ? (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path fillRule="evenodd" d="M10 2a1 1 0 011 1v1a1 1 0 11-2 0V3a1 1 0 011-1zm4 8a4 4 0 11-8 0 4 4 0 018 0zm-.464 4.95l.707.707a1 1 0 001.414-1.414l-.707-.707a1 1 0 00-1.414 1.414zm2.12-10.607a1 1 0 010 1.414l-.706.707a1 1 0 11-1.414-1.414l.707-.707a1 1 0 011.414 0zM17 11a1 1 0 100-2h-1a1 1 0 100 2h1zm-7 4a1 1 0 011 1v1a1 1 0 11-2 0v-1a1 1 0 011-1zM5.05 6.464A1 1 0 106.465 5.05l-.708-.707a1 1 0 00-1.414 1.414l.707.707zm1.414 8.486l-.707.707a1 1 0 01-1.414-1.414l.707-.707a1 1 0 011.414 1.414zM4 11a1 1 0 100-2H3a1 1 0 000 2h1z" clipRule="evenodd" />
+                                </svg>
+                            ) : (
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                    <path d="M17.293 13.293A8 8 0 016.707 2.707a8.001 8.001 0 1010.586 10.586z" />
+                                </svg>
+                            )}
+                        </button>
+                    </div>
+                </div>
+                {showGuide && (
+                    <div className={`fixed top-20 left-4 z-50 p-4 rounded-lg ${
+                        darkMode ? 'bg-gray-800/90' : 'bg-white/90'
+                    } shadow-lg backdrop-blur-sm max-w-md border ${
+                        darkMode ? 'border-gray-700' : 'border-gray-200'
+                    }`}>
+                        <button 
+                            onClick={() => setShowGuide(false)}
+                            className={`absolute top-2 right-2 ${
+                                darkMode ? 'text-gray-400 hover:text-gray-200' : 'text-gray-500 hover:text-gray-700'
+                            }`}
+                            aria-label="Close guide"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                        <h2 className={`text-xl font-semibold mb-2 ${darkMode ? 'text-white' : 'text-gray-800'}`}>
+                            Visualization Guide
+                        </h2>
+                        <ul className={`list-disc list-inside space-y-1 ${darkMode ? 'text-gray-300' : 'text-gray-700'}`}>
+                            <li>Circle area represents the amount of ADA staked in the pool</li>
+                            <li>Color intensity shows the number of blocks minted (brighter = more blocks)</li>
+                            <li>Scroll to zoom in/out, drag to pan around</li>
+                            <li>Hover over circles for detailed information</li>
+                        </ul>
+                    </div>
+                )}
+                <div className="flex-grow relative">
+                    <StakePoolBubbleChart pools={pools} darkMode={darkMode} />
+                </div>
+            </div>
         </div>
-      </div>
-    </main>
-  );
+    );
 }

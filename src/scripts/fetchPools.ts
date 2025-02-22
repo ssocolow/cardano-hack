@@ -1,6 +1,6 @@
-const fs = require('fs');
-const path = require('path');
-const { cardanoService } = require('./services/cardanoService');
+import fs from 'fs';
+import path from 'path';
+import { cardanoService } from './services/CardanoService';
 
 const CACHE_DIR = path.join(process.cwd(), 'cache');
 const POOLS_CACHE_FILE = path.join(CACHE_DIR, 'stake-pools.json');

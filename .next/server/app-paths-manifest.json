@@ -1,3 +1,7 @@
 {
+  "/_not-found/page": "app/_not-found/page.js",
+  "/api/blocks/latest/route": "app/api/blocks/latest/route.js",
+  "/api/pools/route": "app/api/pools/route.js",
+  "/favicon.ico/route": "app/favicon.ico/route.js",
   "/page": "app/page.js"
 }
