@@ -2,6 +2,8 @@
 
 My project for Oxford Blockchain Society Cardano Hackathon 2025! A real-time visualization of Cardano stake pools using D3.js and Next.js. View the live deployment at [https://cardano-live-pool-viz.vercel.app/](https://cardano-live-pool-viz.vercel.app/)
 
+![Screenshot of the visualization](./demo.png)
+
 ## Features
 
 - Interactive bubble chart visualization of all Cardano stake pools
